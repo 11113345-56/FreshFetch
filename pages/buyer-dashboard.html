@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Buyer Dashboard – FreshFetch</title>
+<link rel="stylesheet" href="../css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<div id="buyer-dashboard" class="dashboard-shell active">
+  <nav class="sidebar" id="buyer-sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-icon"><img src="../images/logo.png" onerror="this.parentElement.innerHTML='🌾'"></div>
+      <div class="sidebar-logo-text">FreshFetch</div>
+    </div>
+    <button class="nav-item active" onclick="buyerView('home',this)"><span class="nav-icon">🏠</span><span>Home</span></button>
+    <button class="nav-item" onclick="buyerView('status',this)"><span class="nav-icon">🟢</span><span>Status</span></button>
+    <button class="nav-item" onclick="buyerView('messages',this)"><span class="nav-icon">💬</span><span>Messages</span></button>
+    <button class="nav-item" onclick="buyerView('profile',this)"><span class="nav-icon">👤</span><span>Profile</span></button>
+    <button class="nav-item" onclick="buyerView('settings',this)"><span class="nav-icon">⚙️</span><span>Settings</span></button>
+    <div class="sidebar-bottom">
+      <button class="theme-toggle" onclick="toggleTheme()"><span class="nav-icon">🌙</span><span>Theme</span><div class="toggle-track"><div class="toggle-thumb"></div></div></button>
+      <button class="nav-item danger" onclick="showLogout('buyer')"><span class="nav-icon">🚪</span><span>Log Out</span></button>
+    </div>
+  </nav>
+  <div class="main-content">
+    <div class="topbar">
+      <div class="topbar-left"><span class="topbar-title" id="buyer-topbar-title">Browse Crops</span></div>
+      <div class="user-chip">
+        <div class="user-avatar" id="buyer-avatar" onclick="buyerView('profile',null)">B</div>
+        <span class="user-name" id="buyer-display-name">Buyer</span>
+        <button class="logout-btn" onclick="showLogout('buyer')">Log Out</button>
+      </div>
+    </div>
+    <div class="content-area" id="buyer-content"></div>
+  </div>
+</div>
+
+<!-- CHAT PANEL -->
+<div id="chat-overlay" class="chat-overlay" onclick="closeChatOverlay(event)">
+  <div class="chat-panel">
+    <div class="chat-header">
+      <div class="chat-peer-avatar" id="chat-peer-avatar">?</div>
+      <div class="chat-peer-info">
+        <strong id="chat-peer-name">User</strong>
+        <span id="chat-peer-sub">📍 Location</span>
+      </div>
+      <button class="close-chat" onclick="document.getElementById('chat-overlay').classList.remove('open')">✕</button>
+    </div>
+    <div class="chat-messages" id="chat-messages"><div class="chat-empty">Start the conversation! 👋</div></div>
+    <div class="chat-input-wrap">
+      <input class="chat-input" id="chat-input" type="text" placeholder="Type a message…" onkeydown="if(event.key==='Enter')sendMsg()">
+      <button class="send-btn" onclick="sendMsg()">➤</button>
+    </div>
+  </div>
+</div>
+
+<!-- STATUS VIEWER OVERLAY (WhatsApp-style fullscreen) -->
+<div id="status-viewer" class="status-viewer">
+  <div class="status-progress-bar" id="status-progress-bar"></div>
+  <div class="status-top">
+    <div class="status-top-avatar"><img id="sv-avatar" src="" alt=""></div>
+    <div class="status-top-info">
+      <div class="status-top-name" id="sv-name"></div>
+      <div class="status-top-time" id="sv-time"></div>
+    </div>
+    <button class="status-close" onclick="closeStatusViewer()">✕</button>
+  </div>
+  <div class="status-media">
+    <img id="sv-image" src="" alt="Farmer status">
+    <div class="status-caption" id="sv-caption"></div>
+    <div class="status-nav-left" onclick="prevStatus()"></div>
+    <div class="status-nav-right" onclick="nextStatus()"></div>
+  </div>
+</div>
+
+<!-- CONFIRM MODAL -->
+<div id="confirm-modal" class="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-icon" id="modal-icon">⚠️</div>
+    <div class="modal-title" id="modal-title">Are you sure?</div>
+    <div class="modal-text" id="modal-text">This action cannot be undone.</div>
+    <div class="modal-btns">
+      <button class="modal-cancel" onclick="closeModal()">Cancel</button>
+      <button class="modal-confirm-del" id="modal-confirm-btn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="../js/app.js"></script>
+<script>
+applyTheme();
+currentRole = 'buyer';
+
+// ── STATUS VIEWER STATE ──
+let svStatuses = [];   // array of status objects for current farmer
+let svIndex = 0;
+let svTimer = null;
+const SV_DURATION = 5000; // ms per status
+
+window.addEventListener('DOMContentLoaded', async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { window.location.href = 'buyer-login.html'; return; }
+  currentUser = session.user;
+  const { data } = await sb.from('profiles').select('*').eq('id', currentUser.id).single();
+  if (!data || data.role !== 'buyer') { window.location.href = '../index.html'; return; }
+  currentProfile = data;
+  setTopUser('buyer');
+  buyerView('home', document.querySelector('#buyer-sidebar .nav-item'));
+});
+
+function buyerView(view, btn) {
+  document.querySelectorAll('#buyer-sidebar .nav-item').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const titles = { home:'Browse Crops', status:'Farmer Statuses', messages:'Messages', profile:'My Profile', settings:'Settings' };
+  document.getElementById('buyer-topbar-title').textContent = titles[view] || view;
+  const c = document.getElementById('buyer-content');
+  if (view === 'home') loadBuyerHome(c);
+  else if (view === 'status') loadBuyerStatuses(c);
+  else if (view === 'messages') loadBuyerMessages(c);
+  else if (view === 'profile') c.innerHTML = renderProfile('buyer');
+  else if (view === 'settings') c.innerHTML = renderSettings('buyer');
+}
+
+// ══════════════════════════════════════════
+// BUYER HOME — crops listing
+// ══════════════════════════════════════════
+async function loadBuyerHome(c, filter='') {
+  c.innerHTML = `<div class="search-wrap"><span class="search-icon">🔍</span>
+    <input class="search-input" type="text" id="buyer-search" placeholder="Search crops, farmers, or locations…" value="${filter}" oninput="loadBuyerHome(document.getElementById('buyer-content'),this.value)">
+  </div><div class="section-title">🌿 Available Produce</div>
+  <div class="crops-grid" id="crops-grid"><div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-title">Loading crops…</div></div></div>`;
+
+  let q = sb.from('crops').select('*, profiles(name, location, avatar_url, phone)').eq('status','active');
+  if (filter) q = q.ilike('name', `%${filter}%`);
+  const { data: crops } = await q.order('created_at', { ascending: false });
+
+  const grid = document.getElementById('crops-grid');
+  if (!grid) return;
+  if (!crops || !crops.length) {
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">🌾</div><div class="empty-title">No crops found${filter?' for "'+filter+'"':''}</div><p>Try a different search term</p></div>`;
+    return;
+  }
+  grid.innerHTML = crops.map((crop, i) => {
+    const farmer = crop.profiles || {};
+    const fname = farmer.name || 'Farmer';
+    const floc = farmer.location || 'Uganda';
+    const imgHTML = crop.image_url
+      ? `<img src="${crop.image_url}" alt="${crop.name}" loading="lazy" onerror="this.parentElement.innerHTML='<div class=crop-img-placeholder>🌿</div>'">`
+      : `<div class="crop-img-placeholder">🌿</div>`;
+    return `<div class="crop-card" style="animation-delay:${i*0.05}s">
+      <div class="crop-img-wrap">${imgHTML}<span class="crop-badge">${crop.badge||'Fresh'}</span></div>
+      <div class="crop-body">
+        <div class="crop-name">${crop.name}</div>
+        <div class="crop-meta">
+          <div class="crop-meta-item">🧑‍🌾 ${fname}</div>
+          <div class="crop-meta-item">📍 ${floc}</div>
+          ${crop.quantity ? `<div class="crop-meta-item">📦 ${crop.quantity}</div>` : ''}
+        </div>
+        <div class="crop-price">${crop.price}</div>
+        <button class="purchase-btn" onclick='openChatWithFarmer("${crop.farmer_id}","${escHtml(fname)}","${escHtml(floc)}","${escHtml(crop.name)}")'>💬 Purchase – Chat with Farmer</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════
+// BUYER STATUSES — WhatsApp-style
+// ══════════════════════════════════════════
+async function loadBuyerStatuses(c) {
+  c.innerHTML = `<div class="section-title">🟢 Farmer Updates</div>
+  <p style="color:var(--text-dim);font-size:14px;margin-bottom:24px;">Tap a farmer to see their latest harvest updates</p>
+  <div id="statuses-container"><div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-title">Loading…</div></div></div>`;
+
+  // Fetch all statuses posted in last 24h, grouped by farmer
+  const since = new Date(Date.now() - 24*60*60*1000).toISOString();
+  const { data: statuses } = await sb.from('farmer_statuses')
+    .select('*, profiles(id, name, avatar_url, location)')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false });
+
+  const container = document.getElementById('statuses-container');
+  if (!container) return;
+
+  if (!statuses || !statuses.length) {
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">📸</div><div class="empty-title">No farmer updates yet</div><p>Farmers haven't posted any harvest updates in the last 24 hours</p></div>`;
+    return;
+  }
+
+  // Group by farmer
+  const byFarmer = {};
+  statuses.forEach(s => {
+    const fid = s.farmer_id;
+    if (!byFarmer[fid]) byFarmer[fid] = { profile: s.profiles, statuses: [] };
+    byFarmer[fid].statuses.push(s);
+  });
+
+  const farmers = Object.values(byFarmer);
+
+  container.innerHTML = `
+  <div class="statuses-row">
+    ${farmers.map(f => {
+      const p = f.profile || {};
+      const initials = (p.name||'F')[0];
+      const avi = p.avatar_url ? `<img src="${p.avatar_url}" alt="${p.name}">` : initials;
+      const farmerId = p.id || f.statuses[0].farmer_id;
+      return `<div class="status-bubble" onclick="openStatusViewer('${farmerId}')">
+        <div class="status-ring unseen">
+          <div class="status-ring-inner">${avi}</div>
+        </div>
+        <div class="status-farmer-name">${p.name || 'Farmer'}</div>
+      </div>`;
+    }).join('')}
+  </div>
+
+  <div class="section-title" style="margin-top:8px;">Recent Updates</div>
+  <div class="crops-grid">
+    ${statuses.slice(0,12).map((s, i) => {
+      const p = s.profiles || {};
+      return `<div class="crop-card" style="animation-delay:${i*0.05}s;cursor:pointer" onclick="openStatusViewer('${s.farmer_id}')">
+        <div class="crop-img-wrap">
+          ${s.image_url ? `<img src="${s.image_url}" alt="status" loading="lazy">` : `<div class="crop-img-placeholder">🌿</div>`}
+          <span class="crop-badge">${timeAgo(s.created_at)}</span>
+        </div>
+        <div class="crop-body">
+          <div class="crop-name">${p.name || 'Farmer'}</div>
+          <div class="crop-meta"><div class="crop-meta-item">📍 ${p.location || 'Uganda'}</div></div>
+          ${s.caption ? `<div class="crop-meta-item" style="font-size:13px;margin-top:4px;">${escHtml(s.caption)}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+async function openStatusViewer(farmerId) {
+  const since = new Date(Date.now() - 24*60*60*1000).toISOString();
+  const { data: statuses } = await sb.from('farmer_statuses')
+    .select('*, profiles(name, avatar_url)')
+    .eq('farmer_id', farmerId)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false });
+
+  if (!statuses || !statuses.length) { showToast('No recent updates from this farmer'); return; }
+
+  svStatuses = statuses;
+  svIndex = 0;
+  document.getElementById('status-viewer').classList.add('open');
+  renderStatusSlide(svIndex);
+}
+
+function renderStatusSlide(idx) {
+  clearTimeout(svTimer);
+  const s = svStatuses[idx];
+  if (!s) { closeStatusViewer(); return; }
+  const p = s.profiles || {};
+
+  document.getElementById('sv-name').textContent = p.name || 'Farmer';
+  document.getElementById('sv-time').textContent = timeAgo(s.created_at);
+  document.getElementById('sv-caption').textContent = s.caption || '';
+
+  const img = document.getElementById('sv-image');
+  if (s.image_url) {
+    img.src = s.image_url;
+    img.style.display = 'block';
+  } else {
+    img.style.display = 'none';
+  }
+
+  const avi = document.getElementById('sv-avatar');
+  avi.src = p.avatar_url || '';
+  avi.onerror = () => { avi.style.display='none'; };
+
+  // Progress bar
+  const bar = document.getElementById('status-progress-bar');
+  bar.innerHTML = svStatuses.map((_, i) => `<div class="status-progress-seg"><div class="status-progress-fill" id="sp-${i}" style="width:${i < idx ? '100%' : '0%'}"></div></div>`).join('');
+
+  // Animate current segment
+  setTimeout(() => {
+    const fill = document.getElementById(`sp-${idx}`);
+    if (fill) {
+      fill.style.transition = `width ${SV_DURATION}ms linear`;
+      fill.style.width = '100%';
+    }
+  }, 50);
+
+  svTimer = setTimeout(() => nextStatus(), SV_DURATION);
+}
+
+function nextStatus() {
+  if (svIndex < svStatuses.length - 1) {
+    svIndex++;
+    renderStatusSlide(svIndex);
+  } else {
+    closeStatusViewer();
+  }
+}
+
+function prevStatus() {
+  if (svIndex > 0) {
+    svIndex--;
+    renderStatusSlide(svIndex);
+  }
+}
+
+function closeStatusViewer() {
+  clearTimeout(svTimer);
+  document.getElementById('status-viewer').classList.remove('open');
+}
+
+// ══════════════════════════════════════════
+// BUYER MESSAGES
+// ══════════════════════════════════════════
+async function loadBuyerMessages(c) {
+  c.innerHTML = `<div class="section-title">💬 Your Conversations</div><div class="messages-list" id="buyer-threads-list"><div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-title">Loading…</div></div></div>`;
+
+  const { data } = await sb.from('conversations')
+    .select('*, profiles!conversations_farmer_id_fkey(id, name, avatar_url, location)')
+    .eq('buyer_id', currentUser.id)
+    .order('updated_at', { ascending: false });
+
+  const list = document.getElementById('buyer-threads-list');
+  if (!list) return;
+  if (!data || !data.length) {
+    list.innerHTML = `<div class="empty-state"><div class="empty-icon">💬</div><div class="empty-title">No messages yet</div><p>Browse crops and start a conversation with a farmer!</p></div>`;
+    return;
+  }
+  list.innerHTML = data.map(conv => {
+    const p = conv.profiles || {};
+    const initials = (p.name||'F')[0];
+    const avi = p.avatar_url ? `<img src="${p.avatar_url}" alt="${p.name}">` : initials;
+    return `<div class="msg-thread" onclick="openConversation('${conv.id}','${p.id||conv.farmer_id}','${escHtml(p.name||'Farmer')}','${escHtml(p.location||'')}','${p.avatar_url||''}')">
+      <div class="thread-avatar">${avi}</div>
+      <div class="thread-body">
+        <div class="thread-name">${p.name||'Farmer'}</div>
+        <div class="thread-preview">${conv.last_message || 'No messages yet'}</div>
+      </div>
+      <div class="thread-meta">
+        <span class="thread-time">${timeAgo(conv.updated_at)}</span>
+        ${conv.unread_buyer ? '<div class="unread-dot"></div>' : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+</script>
+</body>
+</html>

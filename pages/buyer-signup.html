@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Buyer Sign Up – FreshFetch</title>
+<link rel="stylesheet" href="../css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="page auth-page buyer-auth active">
+  <div class="auth-card">
+    <button class="back-btn" onclick="location.href='buyer-login.html'">← Back</button>
+    <div class="auth-logo">
+      <div class="auth-logo-icon"><img src="../images/logo.png" onerror="this.parentElement.innerHTML='🌾'"></div>
+      <div class="auth-logo-text">FreshFetch</div>
+    </div>
+    <div class="auth-title">Create your account</div>
+    <div class="auth-sub">Start buying fresh produce directly from farmers</div>
+    <div id="bs-error" class="error-msg"></div>
+    <div class="avatar-upload-wrap">
+      <div class="avatar-preview" id="bs-avatar-preview" onclick="document.getElementById('bs-avatar-file').click()">📷</div>
+      <div>
+        <div class="avatar-upload-label"><span>Upload profile photo</span> (optional)</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-top:4px;">Tap the circle to upload</div>
+      </div>
+      <input type="file" id="bs-avatar-file" accept="image/*" onchange="previewAvatar('bs-avatar-preview','bs-avatar-file')">
+    </div>
+    <div class="form-group"><label class="form-label">Full Name</label><input class="form-input" id="bs-name" type="text" placeholder="e.g. Aisha Nakato"></div>
+    <div class="form-group">
+      <label class="form-label">Phone Number</label>
+      <div class="input-prefix"><span class="prefix-label">+256</span><input type="tel" id="bs-phone" placeholder="700 000 000" maxlength="9"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Password</label><input class="form-input" id="bs-pass" type="password" placeholder="Create a strong password (min 6 chars)"></div>
+    <div class="form-group"><label class="form-label">Location / District</label><input class="form-input" id="bs-loc" type="text" placeholder="e.g. Kampala, Nakawa"></div>
+    <button class="btn-primary gold" id="bs-btn" onclick="signupBuyer()">Create Buyer Account</button>
+    <div class="auth-switch">Already have an account? <a href="buyer-login.html">Log in</a></div>
+  </div>
+</div>
+
+<script src="../js/app.js"></script>
+<script>
+applyTheme();
+
+async function signupBuyer() {
+  const name = val(document.getElementById('bs-name').value);
+  const rawPhone = document.getElementById('bs-phone').value.trim();
+  const pass = document.getElementById('bs-pass').value;
+  const loc = val(document.getElementById('bs-loc').value);
+  if (!name || !rawPhone || !pass || !loc) { showErr('bs-error', 'Please fill in all fields'); return; }
+  if (pass.length < 6) { showErr('bs-error', 'Password must be at least 6 characters'); return; }
+  if (!/^\d{9}$/.test(rawPhone.replace(/\s/g,''))) { showErr('bs-error', 'Enter a valid 9-digit phone number'); return; }
+  setLoading('bs-btn', true, 'Create Buyer Account');
+  const email = rawPhone.replace(/\s/g,'') + '@buyer.freshfetch.ug';
+  const { data, error } = await sb.auth.signUp({ email, password: pass });
+  if (error) { setLoading('bs-btn', false, 'Create Buyer Account'); showErr('bs-error', error.message); return; }
+  let avatar_url = null;
+  const avatarFile = document.getElementById('bs-avatar-file').files[0];
+  if (avatarFile) {
+    try { avatar_url = await uploadFile('avatars', `buyers/${data.user.id}`, avatarFile); } catch(e) {}
+  }
+  await sb.from('profiles').upsert({
+    id: data.user.id, name, phone: rawPhone.replace(/\s/g,''), location: loc,
+    role: 'buyer', avatar_url, status: 'active', created_at: new Date().toISOString()
+  });
+  setLoading('bs-btn', false, 'Create Buyer Account');
+  window.location.href = 'buyer-dashboard.html';
+}
+
+function showErr(id, msg) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 5000);
+}
+function setLoading(btnId, on, originalText) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  btn.disabled = on;
+  btn.innerHTML = on ? '<span class="spinner"></span> Please wait…' : originalText;
+}
+</script>
+<div id="toast" class="toast"></div>
+</body>
+</html>

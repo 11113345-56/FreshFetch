@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Farmer Dashboard – FreshFetch</title>
+<link rel="stylesheet" href="../css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<div id="farmer-dashboard" class="dashboard-shell active">
+  <nav class="sidebar" id="farmer-sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-icon"><img src="../images/logo.png" onerror="this.parentElement.innerHTML='🌾'"></div>
+      <div class="sidebar-logo-text">FreshFetch</div>
+    </div>
+    <button class="nav-item active" onclick="farmerView('home',this)"><span class="nav-icon">🏠</span><span>Home</span></button>
+    <button class="nav-item" onclick="farmerView('status',this)"><span class="nav-icon">📸</span><span>My Status</span></button>
+    <button class="nav-item" onclick="farmerView('messages',this)"><span class="nav-icon">💬</span><span>Messages</span></button>
+    <button class="nav-item" onclick="farmerView('profile',this)"><span class="nav-icon">👤</span><span>Profile</span></button>
+    <button class="nav-item" onclick="farmerView('settings',this)"><span class="nav-icon">⚙️</span><span>Settings</span></button>
+    <div class="sidebar-bottom">
+      <button class="theme-toggle" onclick="toggleTheme()"><span class="nav-icon">🌙</span><span>Theme</span><div class="toggle-track"><div class="toggle-thumb"></div></div></button>
+      <button class="nav-item danger" onclick="showLogout('farmer')"><span class="nav-icon">🚪</span><span>Log Out</span></button>
+    </div>
+  </nav>
+  <div class="main-content">
+    <div class="topbar">
+      <div class="topbar-left"><span class="topbar-title" id="farmer-topbar-title">My Farm Dashboard</span></div>
+      <div class="user-chip">
+        <div class="user-avatar" id="farmer-avatar" onclick="farmerView('profile',null)">F</div>
+        <span class="user-name" id="farmer-display-name">Farmer</span>
+        <button class="logout-btn" onclick="showLogout('farmer')">Log Out</button>
+      </div>
+    </div>
+    <div class="content-area" id="farmer-content"></div>
+  </div>
+</div>
+
+<!-- CHAT PANEL -->
+<div id="chat-overlay" class="chat-overlay" onclick="closeChatOverlay(event)">
+  <div class="chat-panel">
+    <div class="chat-header">
+      <div class="chat-peer-avatar" id="chat-peer-avatar">?</div>
+      <div class="chat-peer-info">
+        <strong id="chat-peer-name">User</strong>
+        <span id="chat-peer-sub">📍 Location</span>
+      </div>
+      <button class="close-chat" onclick="document.getElementById('chat-overlay').classList.remove('open')">✕</button>
+    </div>
+    <div class="chat-messages" id="chat-messages"><div class="chat-empty">Start the conversation! 👋</div></div>
+    <div class="chat-input-wrap">
+      <input class="chat-input" id="chat-input" type="text" placeholder="Type a message…" onkeydown="if(event.key==='Enter')sendMsg()">
+      <button class="send-btn" onclick="sendMsg()">➤</button>
+    </div>
+  </div>
+</div>
+
+<!-- CROP MODAL -->
+<div id="crop-modal" class="modal-overlay">
+  <div class="modal left-align" style="max-width:500px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;">
+      <div class="modal-title" style="margin:0;" id="crop-modal-title">Add New Crop</div>
+      <button class="close-chat" onclick="document.getElementById('crop-modal').classList.remove('open')">✕</button>
+    </div>
+    <div id="crop-modal-error" class="error-msg"></div>
+    <div class="crop-img-upload" id="crop-img-preview" onclick="document.getElementById('crop-img-file').click()">
+      <div class="crop-img-upload-text"><strong>📷</strong>Click to upload crop photo<br><small style="color:var(--text-dim)">JPG, PNG – recommended 800×600</small></div>
+    </div>
+    <input type="file" id="crop-img-file" accept="image/*" onchange="previewCropImg()">
+    <div class="form-group"><label class="form-label">Crop Name</label><input class="form-input" id="cm-name" type="text" placeholder="e.g. Matooke"></div>
+    <div class="form-group"><label class="form-label">Quantity / Description</label><input class="form-input" id="cm-qty" type="text" placeholder="e.g. 80 bunches available"></div>
+    <div class="form-group"><label class="form-label">Price</label><input class="form-input" id="cm-price" type="text" placeholder="e.g. UGX 12,000 / bunch"></div>
+    <div class="form-group"><label class="form-label">Category</label>
+      <select class="form-input" id="cm-badge">
+        <option value="Fresh">Fresh</option><option value="Organic">Organic</option><option value="In Season">In Season</option>
+        <option value="New">New</option><option value="Local">Local</option><option value="Premium">Premium</option>
+      </select>
+    </div>
+    <div id="crop-modal-err" class="error-msg"></div>
+    <button class="btn-primary" id="crop-modal-save-btn" onclick="saveCrop()">Save Crop Listing</button>
+  </div>
+</div>
+
+<!-- CONFIRM MODAL -->
+<div id="confirm-modal" class="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-icon" id="modal-icon">⚠️</div>
+    <div class="modal-title" id="modal-title">Are you sure?</div>
+    <div class="modal-text" id="modal-text">This action cannot be undone.</div>
+    <div class="modal-btns">
+      <button class="modal-cancel" onclick="closeModal()">Cancel</button>
+      <button class="modal-confirm-del" id="modal-confirm-btn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="../js/app.js"></script>
+<script>
+applyTheme();
+currentRole = 'farmer';
+
+window.addEventListener('DOMContentLoaded', async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { window.location.href = 'farmer-login.html'; return; }
+  currentUser = session.user;
+  const { data } = await sb.from('profiles').select('*').eq('id', currentUser.id).single();
+  if (!data || data.role !== 'farmer') { window.location.href = '../index.html'; return; }
+  currentProfile = data;
+  setTopUser('farmer');
+  farmerView('home', document.querySelector('#farmer-sidebar .nav-item'));
+});
+
+function farmerView(view, btn) {
+  document.querySelectorAll('#farmer-sidebar .nav-item').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const titles = { home:'My Farm Dashboard', status:'My Status Updates', messages:'Buyer Inquiries', profile:'My Profile', settings:'Settings' };
+  document.getElementById('farmer-topbar-title').textContent = titles[view] || view;
+  const c = document.getElementById('farmer-content');
+  if (view === 'home') loadFarmerHome(c);
+  else if (view === 'status') loadFarmerStatusPage(c);
+  else if (view === 'messages') loadFarmerMessages(c);
+  else if (view === 'profile') c.innerHTML = renderProfile('farmer');
+  else if (view === 'settings') c.innerHTML = renderSettings('farmer');
+}
+
+// ══════════════════════════════════════════
+// FARMER HOME
+// ══════════════════════════════════════════
+async function loadFarmerHome(c) {
+  const p = currentProfile || {};
+  const initials = (p.name||'F').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+  const avi = p.avatar_url ? `<img src="${p.avatar_url}" alt="${p.name}">` : initials;
+  c.innerHTML = `
+  <div class="farmer-header">
+    <div class="farmer-big-avatar" onclick="document.getElementById('farmer-photo-input').click()" title="Click to change photo">${avi}</div>
+    <input type="file" id="farmer-photo-input" accept="image/*" style="display:none" onchange="updateFarmerPhoto()">
+    <div class="farmer-info">
+      <h2>${p.name || 'Farmer'}</h2>
+      <span>🌱 Verified Farmer · ${p.location || 'Uganda'}</span>
+      <p>📱 ${fmtPhone(p.phone)}</p>
+      ${p.created_at ? `<div class="joined-badge">📅 Joined ${fmtDate(p.created_at)}</div>` : ''}
+    </div>
+  </div>
+  <div class="stats-row">
+    <div class="stat-card"><div class="stat-icon">🌾</div><div class="stat-value" id="stat-listings">—</div><div class="stat-label">Active Listings</div></div>
+    <div class="stat-card"><div class="stat-icon">💬</div><div class="stat-value" id="stat-inquiries">—</div><div class="stat-label">Buyer Inquiries</div></div>
+    <div class="stat-card"><div class="stat-icon">📸</div><div class="stat-value" id="stat-statuses">—</div><div class="stat-label">Status Updates</div></div>
+    <div class="stat-card"><div class="stat-icon">⭐</div><div class="stat-value">4.8</div><div class="stat-label">Rating</div></div>
+  </div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <div class="section-title" style="margin:0">My Listed Crops</div>
+    <button class="add-crop-btn" onclick="openCropModal(null)">＋ Add New Crop</button>
+  </div>
+  <div class="crops-grid" id="farmer-crops-grid"><div class="empty-state"><div class="empty-icon">⏳</div></div></div>`;
+  await Promise.all([loadFarmerCrops(), loadFarmerStats()]);
+}
+
+async function loadFarmerCrops() {
+  const grid = document.getElementById('farmer-crops-grid');
+  if (!grid) return;
+  const { data: crops } = await sb.from('crops').select('*').eq('farmer_id', currentUser.id).order('created_at', { ascending: false });
+  if (!crops || !crops.length) {
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">🌱</div><div class="empty-title">No crops listed yet</div><p>Click "Add New Crop" to get started!</p></div>`;
+    return;
+  }
+  grid.innerHTML = crops.map((crop, i) => {
+    const imgHTML = crop.image_url ? `<img src="${crop.image_url}" alt="${crop.name}" loading="lazy">` : `<div class="crop-img-placeholder">🌿</div>`;
+    return `<div class="crop-card" style="animation-delay:${i*0.08}s">
+      <div class="crop-img-wrap">${imgHTML}<span class="crop-badge">${crop.badge||'Listed'}</span></div>
+      <div class="crop-body">
+        <div class="crop-name">${crop.name}</div>
+        <div class="crop-meta">
+          ${crop.quantity ? `<div class="crop-meta-item">📦 ${crop.quantity}</div>` : ''}
+          <div class="crop-meta-item">💰 ${crop.price}</div>
+          <div class="crop-meta-item" style="font-size:11px;color:var(--text-dim)">Listed ${timeAgo(crop.created_at)}</div>
+        </div>
+        <div class="crop-price">${crop.price}</div>
+        <div class="crop-actions">
+          <button class="btn-edit" onclick='openCropModal(${JSON.stringify(crop).replace(/'/g,"&#39;")})'>✏️ Edit</button>
+          <button class="btn-delete-crop" onclick="deleteCrop('${crop.id}','${escHtml(crop.name)}')">🗑️ Delete</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  const el = document.getElementById('stat-listings');
+  if (el) el.textContent = crops.length;
+}
+
+async function loadFarmerStats() {
+  const { count: convs } = await sb.from('conversations').select('*',{count:'exact',head:true}).eq('farmer_id', currentUser.id);
+  const { count: statuses } = await sb.from('farmer_statuses').select('*',{count:'exact',head:true}).eq('farmer_id', currentUser.id);
+  const el1 = document.getElementById('stat-inquiries');
+  const el2 = document.getElementById('stat-statuses');
+  if (el1) el1.textContent = convs || 0;
+  if (el2) el2.textContent = statuses || 0;
+}
+
+async function updateFarmerPhoto() {
+  const file = document.getElementById('farmer-photo-input').files[0];
+  if (!file) return;
+  try {
+    const url = await uploadFile('avatars', `farmers/${currentUser.id}`, file);
+    await sb.from('profiles').update({ avatar_url: url }).eq('id', currentUser.id);
+    currentProfile.avatar_url = url;
+    setTopUser('farmer');
+    loadFarmerHome(document.getElementById('farmer-content'));
+    showToast('Photo updated! 📷');
+  } catch(e) { showToast('Upload failed: ' + e.message, true); }
+}
+
+// ══════════════════════════════════════════
+// FARMER STATUS PAGE — upload & view own statuses
+// ══════════════════════════════════════════
+async function loadFarmerStatusPage(c) {
+  c.innerHTML = `
+  <div class="section-title">📸 Post a Harvest Update</div>
+  <p style="color:var(--text-dim);font-size:14px;margin-bottom:20px;">Share what you've just harvested. Buyers will see it as a status for 24 hours.</p>
+  
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:24px;max-width:480px;margin-bottom:32px;">
+    <div class="status-upload-area" id="status-upload-area" onclick="document.getElementById('status-img-input').click()">
+      <div style="font-size:40px;margin-bottom:8px;">📷</div>
+      <div style="color:var(--text-dim);font-size:14px;">Tap to upload harvest photo</div>
+      <div style="font-size:12px;color:var(--text-dim);margin-top:4px;">JPG or PNG</div>
+    </div>
+    <input type="file" id="status-img-input" accept="image/*" onchange="previewStatusImg()">
+    <div class="form-group">
+      <label class="form-label">Caption (optional)</label>
+      <input class="form-input" id="status-caption" type="text" placeholder="e.g. Fresh matooke ready for pickup! 🍌">
+    </div>
+    <button class="btn-primary" id="status-post-btn" onclick="postFarmerStatus()">📤 Post Status Update</button>
+  </div>
+
+  <div class="section-title">My Recent Statuses</div>
+  <div class="crops-grid" id="my-statuses-grid"><div class="empty-state"><div class="empty-icon">⏳</div></div></div>`;
+
+  loadMyStatuses();
+}
+
+let statusImgFile = null;
+
+function previewStatusImg() {
+  const file = document.getElementById('status-img-input').files[0];
+  if (!file) return;
+  statusImgFile = file;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const area = document.getElementById('status-upload-area');
+    area.innerHTML = `<img class="status-preview-img" src="${e.target.result}" alt="preview"><div style="font-size:13px;color:var(--text-dim)">Tap to change photo</div>`;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function postFarmerStatus() {
+  const caption = document.getElementById('status-caption').value.trim();
+  if (!statusImgFile && !caption) { showToast('Add a photo or caption first', true); return; }
+
+  setLoading('status-post-btn', true, '📤 Post Status Update');
+  let image_url = null;
+  if (statusImgFile) {
+    try {
+      image_url = await uploadFile('farmer-statuses', `${currentUser.id}/${Date.now()}_${statusImgFile.name}`, statusImgFile);
+    } catch(e) { showToast('Image upload failed', true); setLoading('status-post-btn', false, '📤 Post Status Update'); return; }
+  }
+
+  const { error } = await sb.from('farmer_statuses').insert({
+    farmer_id: currentUser.id,
+    image_url,
+    caption: caption || null,
+    created_at: new Date().toISOString()
+  });
+
+  setLoading('status-post-btn', false, '📤 Post Status Update');
+  if (error) { showToast('Post failed: ' + error.message, true); return; }
+  statusImgFile = null;
+  showToast('Status posted! Buyers can see it for 24h 🌿');
+  loadFarmerStatusPage(document.getElementById('farmer-content'));
+}
+
+async function loadMyStatuses() {
+  const grid = document.getElementById('my-statuses-grid');
+  if (!grid) return;
+  const { data } = await sb.from('farmer_statuses').select('*').eq('farmer_id', currentUser.id).order('created_at', { ascending: false });
+  if (!data || !data.length) {
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">📸</div><div class="empty-title">No status updates yet</div><p>Post your first harvest update above!</p></div>`;
+    return;
+  }
+  grid.innerHTML = data.map((s, i) => {
+    const isRecent = (Date.now() - new Date(s.created_at)) < 24*60*60*1000;
+    return `<div class="crop-card" style="animation-delay:${i*0.06}s">
+      <div class="crop-img-wrap">
+        ${s.image_url ? `<img src="${s.image_url}" alt="status" loading="lazy">` : `<div class="crop-img-placeholder">📸</div>`}
+        <span class="crop-badge" style="${isRecent ? '' : 'background:#888'}">${isRecent ? '🟢 Live' : 'Expired'}</span>
+      </div>
+      <div class="crop-body">
+        ${s.caption ? `<div class="crop-name" style="font-size:14px;">${escHtml(s.caption)}</div>` : '<div class="crop-name" style="font-size:14px;color:var(--text-dim)">No caption</div>'}
+        <div class="crop-meta"><div class="crop-meta-item">🕐 ${timeAgo(s.created_at)}</div></div>
+        <div class="crop-actions">
+          <button class="btn-delete-crop" onclick="deleteStatus('${s.id}')">🗑️ Delete</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function deleteStatus(id) {
+  showModal('🗑️','Delete this status?','Buyers will no longer see this update.','Delete', async () => {
+    closeModal();
+    await sb.from('farmer_statuses').delete().eq('id', id);
+    showToast('Status deleted');
+    loadMyStatuses();
+  });
+}
+
+// ══════════════════════════════════════════
+// FARMER MESSAGES
+// ══════════════════════════════════════════
+async function loadFarmerMessages(c) {
+  c.innerHTML = `<div class="section-title">💬 Buyer Inquiries</div><div class="messages-list" id="farmer-threads-list"><div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-title">Loading…</div></div></div>`;
+  const { data } = await sb.from('conversations')
+    .select('*, profiles!conversations_buyer_id_fkey(id, name, avatar_url, location)')
+    .eq('farmer_id', currentUser.id)
+    .order('updated_at', { ascending: false });
+  const list = document.getElementById('farmer-threads-list');
+  if (!list) return;
+  if (!data || !data.length) {
+    list.innerHTML = `<div class="empty-state"><div class="empty-icon">💬</div><div class="empty-title">No buyer inquiries yet</div><p>Buyers will contact you when they're interested in your crops!</p></div>`;
+    return;
+  }
+  list.innerHTML = data.map(conv => {
+    const p = conv.profiles || {};
+    const initials = (p.name||'B')[0];
+    const avi = p.avatar_url ? `<img src="${p.avatar_url}" alt="${p.name}">` : initials;
+    return `<div class="msg-thread" onclick="openConversation('${conv.id}','${p.id||conv.buyer_id}','${escHtml(p.name||'Buyer')}','${escHtml(p.location||'')}','${p.avatar_url||''}')">
+      <div class="thread-avatar">${avi}</div>
+      <div class="thread-body">
+        <div class="thread-name">${p.name||'Buyer'}</div>
+        <div class="thread-preview">${conv.last_message || 'No messages yet'}</div>
+      </div>
+      <div class="thread-meta">
+        <span class="thread-time">${timeAgo(conv.updated_at)}</span>
+        ${conv.unread_farmer ? '<div class="unread-dot"></div>' : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════
+// CROP MODAL
+// ══════════════════════════════════════════
+function openCropModal(crop) {
+  editingCropId = crop?.id || null;
+  cropImgFile = null;
+  document.getElementById('crop-modal-title').textContent = crop ? 'Edit Crop Listing' : 'Add New Crop';
+  document.getElementById('cm-name').value = crop?.name || '';
+  document.getElementById('cm-qty').value = crop?.quantity || '';
+  document.getElementById('cm-price').value = crop?.price || '';
+  document.getElementById('cm-badge').value = crop?.badge || 'Fresh';
+  const preview = document.getElementById('crop-img-preview');
+  preview.innerHTML = crop?.image_url
+    ? `<img src="${crop.image_url}" style="width:100%;height:100%;object-fit:cover;border-radius:14px;">`
+    : `<div class="crop-img-upload-text"><strong>📷</strong>Click to upload crop photo<br><small>JPG, PNG recommended</small></div>`;
+  document.getElementById('crop-img-file').value = '';
+  document.getElementById('crop-modal-err').classList.remove('show');
+  document.getElementById('crop-modal').classList.add('open');
+}
+
+async function saveCrop() {
+  const name = val(document.getElementById('cm-name').value);
+  const qty = val(document.getElementById('cm-qty').value);
+  const price = val(document.getElementById('cm-price').value);
+  const badge = document.getElementById('cm-badge').value;
+  if (!name || !price) { showErr('crop-modal-err', 'Name and price are required'); return; }
+  setLoading('crop-modal-save-btn', true, 'Save Crop Listing');
+  let image_url = editingCropId ? (document.getElementById('crop-img-preview').querySelector('img')?.src || null) : null;
+  if (cropImgFile) {
+    try { image_url = await uploadFile('crop-images', `${currentUser.id}/${Date.now()}_${cropImgFile.name}`, cropImgFile); }
+    catch(e) { showToast('Image upload failed', true); }
+  }
+  const payload = { name, quantity: qty||'', price, badge, farmer_id: currentUser.id, status: 'active' };
+  if (image_url) payload.image_url = image_url;
+  let error;
+  if (editingCropId) {
+    ({ error } = await sb.from('crops').update(payload).eq('id', editingCropId));
+  } else {
+    ({ error } = await sb.from('crops').insert({ ...payload, created_at: new Date().toISOString() }));
+  }
+  setLoading('crop-modal-save-btn', false, 'Save Crop Listing');
+  if (error) { showErr('crop-modal-err', error.message); return; }
+  document.getElementById('crop-modal').classList.remove('open');
+  showToast(editingCropId ? 'Crop updated! ✏️' : 'Crop listed! 🌾');
+  loadFarmerCrops();
+}
+
+async function deleteCrop(id, name) {
+  showModal('🗑️', `Delete "${name}"?`, 'This listing will be removed permanently.', 'Delete', async () => {
+    closeModal();
+    await sb.from('crops').delete().eq('id', id);
+    showToast('Crop deleted');
+    loadFarmerCrops();
+  });
+}
+
+function showErr(id, msg) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 5000);
+}
+</script>
+</body>
+</html>

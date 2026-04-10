@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Dashboard – FreshFetch</title>
+<link rel="stylesheet" href="../css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<div id="admin-dashboard" class="dashboard-shell active" style="flex-direction:column;">
+  <div class="admin-topnav">
+    <div class="admin-logo">
+      <div class="admin-logo-icon"><span>🔐</span></div>
+      <div class="admin-logo-text">FreshFetch Admin</div>
+    </div>
+    <div class="admin-nav-tabs">
+      <button class="admin-tab active" onclick="adminView('overview',this)">📊 Overview</button>
+      <button class="admin-tab" onclick="adminView('farmers',this)">🌱 Farmers</button>
+      <button class="admin-tab" onclick="adminView('buyers',this)">🛒 Buyers</button>
+      <button class="admin-tab" onclick="adminView('crops',this)">🌾 Crops</button>
+      <button class="admin-tab" onclick="adminView('statuses',this)">📸 Statuses</button>
+      <button class="admin-tab" onclick="adminView('profile',this)">👤 Profile</button>
+      <button class="admin-tab" onclick="adminView('settings',this)">⚙️ Settings</button>
+    </div>
+    <div class="admin-topnav-right">
+      <div class="admin-avatar" id="admin-avatar">A</div>
+      <span style="font-size:14px;font-weight:600;" id="admin-display-name">Admin</span>
+      <button class="logout-btn" onclick="showLogout('admin')">Log Out</button>
+    </div>
+  </div>
+  <div class="admin-content" id="admin-content"></div>
+</div>
+
+<div id="confirm-modal" class="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-icon" id="modal-icon">⚠️</div>
+    <div class="modal-title" id="modal-title">Are you sure?</div>
+    <div class="modal-text" id="modal-text">This action cannot be undone.</div>
+    <div class="modal-btns">
+      <button class="modal-cancel" onclick="closeModal()">Cancel</button>
+      <button class="modal-confirm-del" id="modal-confirm-btn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="../js/app.js"></script>
+<script>
+applyTheme();
+currentRole = 'admin';
+
+window.addEventListener('DOMContentLoaded', async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { window.location.href = 'admin-login.html'; return; }
+  currentUser = session.user;
+  const { data } = await sb.from('profiles').select('*').eq('id', currentUser.id).single();
+  if (!data || data.role !== 'admin') { window.location.href = '../index.html'; return; }
+  currentProfile = data;
+  const p = currentProfile || {};
+  const initials = (p.name||'A').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+  const av = document.getElementById('admin-avatar');
+  av.innerHTML = p.avatar_url ? `<img src="${p.avatar_url}" alt="${p.name}">` : initials;
+  document.getElementById('admin-display-name').textContent = p.name || 'Admin';
+  adminView('overview', document.querySelector('.admin-tab'));
+});
+
+function adminView(view, btn) {
+  document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const c = document.getElementById('admin-content');
+  if (view === 'overview') loadAdminOverview(c);
+  else if (view === 'farmers') loadAdminUsers(c, 'farmer');
+  else if (view === 'buyers') loadAdminUsers(c, 'buyer');
+  else if (view === 'crops') loadAdminCrops(c);
+  else if (view === 'statuses') loadAdminStatuses(c);
+  else if (view === 'profile') c.innerHTML = renderAdminProfile();
+  else if (view === 'settings') c.innerHTML = renderAdminSettings();
+}
+
+async function loadAdminOverview(c) {
+  c.innerHTML = `<div class="admin-stats-row">
+    <div class="admin-stat"><div class="admin-stat-icon">👥</div><div class="admin-stat-value" id="astat-users">—</div><div class="admin-stat-label">Total Users</div></div>
+    <div class="admin-stat"><div class="admin-stat-icon">🌱</div><div class="admin-stat-value" id="astat-farmers">—</div><div class="admin-stat-label">Farmers</div></div>
+    <div class="admin-stat"><div class="admin-stat-icon">🛒</div><div class="admin-stat-value" id="astat-buyers">—</div><div class="admin-stat-label">Buyers</div></div>
+    <div class="admin-stat"><div class="admin-stat-icon">🌾</div><div class="admin-stat-value" id="astat-crops">—</div><div class="admin-stat-label">Active Listings</div></div>
+    <div class="admin-stat"><div class="admin-stat-icon">💬</div><div class="admin-stat-value" id="astat-msgs">—</div><div class="admin-stat-label">Conversations</div></div>
+    <div class="admin-stat"><div class="admin-stat-icon">🚫</div><div class="admin-stat-value" id="astat-suspended">—</div><div class="admin-stat-label">Suspended</div></div>
+  </div>
+  <div class="chart-wrap">
+    <div class="chart-title">📊 Platform Activity</div>
+    <div class="bar-chart" id="admin-bar-chart"></div>
+    <div style="display:flex;gap:12px;margin-top:16px;justify-content:center;" id="admin-bar-labels"></div>
+  </div>`;
+
+  const [{ count: farmers }, { count: buyers }, { count: crops }, { count: convs }, { count: suspended }] = await Promise.all([
+    sb.from('profiles').select('*',{count:'exact',head:true}).eq('role','farmer'),
+    sb.from('profiles').select('*',{count:'exact',head:true}).eq('role','buyer'),
+    sb.from('crops').select('*',{count:'exact',head:true}).eq('status','active'),
+    sb.from('conversations').select('*',{count:'exact',head:true}),
+    sb.from('profiles').select('*',{count:'exact',head:true}).eq('status','suspended'),
+  ]);
+  const f=farmers||0,b=buyers||0,cr=crops||0,cv=convs||0,s=suspended||0;
+  document.getElementById('astat-farmers').textContent = f;
+  document.getElementById('astat-buyers').textContent = b;
+  document.getElementById('astat-users').textContent = f+b;
+  document.getElementById('astat-crops').textContent = cr;
+  document.getElementById('astat-msgs').textContent = cv;
+  document.getElementById('astat-suspended').textContent = s;
+  renderBarChart(['Farmers','Buyers','Crops','Chats','Suspended','Total'],[f,b,cr,cv,s,f+b]);
+}
+
+function renderBarChart(labels, values) {
+  const max = Math.max(...values, 1);
+  const chart = document.getElementById('admin-bar-chart');
+  const labelsEl = document.getElementById('admin-bar-labels');
+  if (!chart) return;
+  chart.innerHTML = values.map((v,i) => `<div class="bar-group"><div class="bar" style="height:${Math.round((v/max)*140)+4}px" title="${labels[i]}: ${v}"></div><div class="bar-label">${v}</div></div>`).join('');
+  if (labelsEl) labelsEl.innerHTML = labels.map(l=>`<span style="font-size:11px;color:var(--text-dim)">${l}</span>`).join('');
+}
+
+async function loadAdminUsers(c, role) {
+  const emoji = role==='farmer'?'🌱':'🛒';
+  const label = role==='farmer'?'Farmers':'Buyers';
+  c.innerHTML = `<div class="admin-section-title">${emoji} ${label}</div>
+  <div class="admin-table-wrap"><table class="admin-table">
+    <thead><tr><th>Name</th><th>Phone</th><th>Location</th><th>Joined</th><th>Status</th><th>Actions</th></tr></thead>
+    <tbody id="admin-users-tbody"><tr><td colspan="6" style="text-align:center;color:var(--text-dim);padding:30px">Loading…</td></tr></tbody>
+  </table></div>`;
+  const { data: users } = await sb.from('profiles').select('*').eq('role', role).order('created_at', { ascending: false });
+  const tbody = document.getElementById('admin-users-tbody');
+  if (!tbody) return;
+  if (!users || !users.length) { tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-dim);padding:30px">No ${label} yet</td></tr>`; return; }
+  tbody.innerHTML = users.map(u => {
+    const susp = u.status === 'suspended';
+    return `<tr>
+      <td><div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--green-mid),var(--lime));display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0;overflow:hidden;">
+          ${u.avatar_url ? `<img src="${u.avatar_url}" style="width:100%;height:100%;object-fit:cover;">` : (u.name||'?')[0]}
+        </div>
+        <strong>${u.name||'—'}</strong>
+      </div></td>
+      <td>${fmtPhone(u.phone)}</td>
+      <td>${u.location||'—'}</td>
+      <td style="font-size:12px;color:var(--text-dim)">${fmtDate(u.created_at)}</td>
+      <td><span class="badge ${susp?'badge-red':'badge-green'}">${u.status||'active'}</span></td>
+      <td><div class="admin-actions">
+        <button class="admin-action-btn ${susp?'btn-unsuspend':'btn-suspend'}" onclick="adminToggleSuspend('${u.id}','${escHtml(u.name||'')}','${u.status||'active'}','${role}')">${susp?'✅ Restore':'⏸ Suspend'}</button>
+        <button class="admin-action-btn btn-del-user" onclick="adminDeleteUser('${u.id}','${escHtml(u.name||'')}','${role}')">🗑️ Delete</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadAdminCrops(c) {
+  c.innerHTML = `<div class="admin-section-title">🌾 All Crop Listings</div>
+  <div class="admin-table-wrap"><table class="admin-table">
+    <thead><tr><th>Image</th><th>Crop</th><th>Farmer</th><th>Price</th><th>Qty</th><th>Badge</th><th>Listed</th><th>Actions</th></tr></thead>
+    <tbody id="admin-crops-tbody"><tr><td colspan="8" style="text-align:center;color:var(--text-dim);padding:30px">Loading…</td></tr></tbody>
+  </table></div>`;
+  const { data: crops } = await sb.from('crops').select('*, profiles(name, location)').order('created_at', { ascending: false });
+  const tbody = document.getElementById('admin-crops-tbody');
+  if (!tbody) return;
+  if (!crops || !crops.length) { tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-dim);padding:30px">No crops yet</td></tr>`; return; }
+  tbody.innerHTML = crops.map(crop => `<tr>
+    <td><div style="width:44px;height:44px;border-radius:8px;overflow:hidden;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:20px;">
+      ${crop.image_url ? `<img src="${crop.image_url}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML='🌿'">` : '🌿'}
+    </div></td>
+    <td><strong>${crop.name}</strong></td>
+    <td>${crop.profiles?.name||'—'}</td>
+    <td style="color:var(--gold);font-weight:600">${crop.price}</td>
+    <td style="font-size:13px">${crop.quantity||'—'}</td>
+    <td><span class="badge badge-green">${crop.badge||'Fresh'}</span></td>
+    <td style="font-size:12px;color:var(--text-dim)">${timeAgo(crop.created_at)}</td>
+    <td><button class="admin-action-btn btn-del-user" onclick="adminDeleteCrop('${crop.id}','${escHtml(crop.name)}')">🗑️ Remove</button></td>
+  </tr>`).join('');
+}
+
+async function loadAdminStatuses(c) {
+  c.innerHTML = `<div class="admin-section-title">📸 All Farmer Statuses</div>
+  <div class="admin-table-wrap"><table class="admin-table">
+    <thead><tr><th>Image</th><th>Farmer</th><th>Caption</th><th>Posted</th><th>Live?</th><th>Actions</th></tr></thead>
+    <tbody id="admin-statuses-tbody"><tr><td colspan="6" style="text-align:center;color:var(--text-dim);padding:30px">Loading…</td></tr></tbody>
+  </table></div>`;
+  const { data: statuses } = await sb.from('farmer_statuses').select('*, profiles(name)').order('created_at', { ascending: false });
+  const tbody = document.getElementById('admin-statuses-tbody');
+  if (!tbody) return;
+  if (!statuses || !statuses.length) { tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-dim);padding:30px">No statuses yet</td></tr>`; return; }
+  tbody.innerHTML = statuses.map(s => {
+    const isLive = (Date.now() - new Date(s.created_at)) < 24*60*60*1000;
+    return `<tr>
+      <td><div style="width:44px;height:44px;border-radius:8px;overflow:hidden;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:20px;">
+        ${s.image_url ? `<img src="${s.image_url}" style="width:100%;height:100%;object-fit:cover;">` : '📸'}
+      </div></td>
+      <td>${s.profiles?.name||'—'}</td>
+      <td style="font-size:13px;color:var(--text-dim)">${s.caption||'—'}</td>
+      <td style="font-size:12px;color:var(--text-dim)">${timeAgo(s.created_at)}</td>
+      <td><span class="badge ${isLive?'badge-green':'badge-red'}">${isLive?'Live':'Expired'}</span></td>
+      <td><button class="admin-action-btn btn-del-user" onclick="adminDeleteStatus('${s.id}')">🗑️ Remove</button></td>
+    </tr>`;
+  }).join('');
+}
+
+async function adminToggleSuspend(userId, name, currentStatus, role) {
+  const suspend = currentStatus !== 'suspended';
+  const action = suspend ? 'Suspend' : 'Restore';
+  showModal(suspend?'⏸️':'✅', `${action} "${name}"?`,
+    suspend ? 'This user will lose access until restored.' : 'This user will regain access.', action, async () => {
+      closeModal();
+      await sb.from('profiles').update({ status: suspend?'suspended':'active' }).eq('id', userId);
+      showToast(`${name} ${suspend?'suspended':'restored'}`);
+      loadAdminUsers(document.getElementById('admin-content'), role);
+    });
+}
+
+async function adminDeleteUser(userId, name, role) {
+  showModal('🗑️', `Delete "${name}"?`, 'All their data will be permanently removed.', 'Delete', async () => {
+    closeModal();
+    await sb.from('profiles').delete().eq('id', userId);
+    showToast(`${name} deleted`);
+    loadAdminUsers(document.getElementById('admin-content'), role);
+  });
+}
+
+async function adminDeleteCrop(cropId, name) {
+  showModal('🗑️', `Remove "${name}"?`, 'This crop listing will be deleted.', 'Remove', async () => {
+    closeModal();
+    await sb.from('crops').delete().eq('id', cropId);
+    showToast('Crop removed');
+    loadAdminCrops(document.getElementById('admin-content'));
+  });
+}
+
+async function adminDeleteStatus(statusId) {
+  showModal('🗑️','Remove this status?','This update will be deleted.','Remove', async () => {
+    closeModal();
+    await sb.from('farmer_statuses').delete().eq('id', statusId);
+    showToast('Status removed');
+    loadAdminStatuses(document.getElementById('admin-content'));
+  });
+}
+
+function renderAdminProfile() {
+  const p = currentProfile || {};
+  const initials = (p.name||'A').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+  const avi = p.avatar_url ? `<img src="${p.avatar_url}" alt="${p.name}">` : initials;
+  return `<div class="profile-card">
+    <div class="profile-avatar-big" style="background:linear-gradient(135deg,#7c3aed,#a78bfa)" onclick="document.getElementById('admin-profile-photo').click()">${avi}</div>
+    <input type="file" id="admin-profile-photo" accept="image/*" style="display:none" onchange="updateAdminPhoto()">
+    <div class="profile-name">${p.name||'Admin'}</div>
+    <div class="profile-role" style="color:#a78bfa">🔐 Platform Administrator</div>
+    <div class="profile-change-photo" onclick="document.getElementById('admin-profile-photo').click()">📷 Change photo</div>
+    <div class="profile-field"><span class="profile-field-icon">👤</span><div class="profile-field-content"><div class="profile-field-label">Full Name</div><div class="profile-field-value">${p.name||'—'}</div></div></div>
+    <div class="profile-field"><span class="profile-field-icon">📧</span><div class="profile-field-content"><div class="profile-field-label">Email Address</div><div class="profile-field-value">${currentUser?.email||'—'}</div></div></div>
+    <div class="profile-field"><span class="profile-field-icon">📅</span><div class="profile-field-content"><div class="profile-field-label">Member Since</div><div class="profile-field-value">${fmtDate(p.created_at)}</div></div></div>
+  </div>`;
+}
+
+async function updateAdminPhoto() {
+  const file = document.getElementById('admin-profile-photo').files[0];
+  if (!file) return;
+  try {
+    const url = await uploadFile('avatars', `admins/${currentUser.id}`, file);
+    await sb.from('profiles').update({ avatar_url: url }).eq('id', currentUser.id);
+    currentProfile.avatar_url = url;
+    document.getElementById('admin-avatar').innerHTML = `<img src="${url}">`;
+    adminView('profile', null);
+    showToast('Photo updated!');
+  } catch(e) { showToast('Upload failed', true); }
+}
+
+function renderAdminSettings() {
+  const p = currentProfile || {};
+  return `
+  <div class="settings-section">
+    <div class="settings-heading">Admin Account</div>
+    <div class="settings-item"><span class="settings-label">👤 Name</span><span style="font-size:14px;color:var(--text-dim)">${p.name||'—'}</span></div>
+    <div class="settings-item"><span class="settings-label">📧 Email</span><span style="font-size:14px;color:var(--text-dim)">${currentUser?.email||'—'}</span></div>
+    <div class="settings-item"><span class="settings-label">📅 Joined</span><span style="font-size:14px;color:var(--text-dim)">${fmtDate(p.created_at)}</span></div>
+  </div>
+  <div class="settings-section">
+    <div class="settings-heading">Appearance</div>
+    <div class="settings-item"><span class="settings-label">🌙 Dark / Light Mode</span><div class="toggle-track" onclick="toggleTheme()" style="cursor:pointer"><div class="toggle-thumb"></div></div></div>
+  </div>
+  <div class="settings-section">
+    <div class="settings-heading">Danger Zone</div>
+    <div class="settings-item"><span class="settings-label" style="color:#ff6b6b">🗑️ Delete Admin Account</span><button class="danger-btn" onclick="showDeleteAccount()">Delete</button></div>
+  </div>`;
+}
+</script>
+</body>
+</html>

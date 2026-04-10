@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FreshFetch – Farm Fresh, Delivered Fast</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="images/logo.png" type="image/png">
+</head>
+<body>
+
+<div id="welcome" class="page active">
+  <!-- 
+    ═══════════════════════════════════════════════
+    BACKGROUND IMAGE: Save your hero image as:
+      images/hero-bg.jpg
+    (create the images/ folder next to this index.html)
+    ═══════════════════════════════════════════════
+  -->
+  <div class="welcome-bg"></div>
+  <div class="leaf-bg">
+    <div class="leaf">🌿</div>
+    <div class="leaf">🍃</div>
+    <div class="leaf">🌱</div>
+    <div class="leaf">🌾</div>
+    <div class="leaf">🍀</div>
+  </div>
+  <div class="welcome-content">
+    <div class="logo-wrap">
+      <div class="logo-icon">
+        <img src="images/logo.png" alt="FreshFetch" onerror="this.parentElement.innerHTML='🌿'">
+      </div>
+      <div class="logo-text">FreshFetch</div>
+    </div>
+    <p class="tagline">Farm Fresh. Delivered Fast. Direct from the Source.</p>
+    <div class="welcome-btns">
+      <button class="btn-farmer" onclick="location.href='pages/farmer-login.html'">🌱 Join as a Farmer</button>
+      <button class="btn-buyer" onclick="location.href='pages/buyer-login.html'">🛒 Join as a Buyer</button>
+    </div>
+  </div>
+
+  <!-- Hidden admin icon — bottom right corner -->
+  <button class="btn-admin-corner" onclick="location.href='pages/admin-login.html'" title="Admin Portal">🔐</button>
+</div>
+
+</body>
+</html>

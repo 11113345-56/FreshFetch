@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Buyer Login – FreshFetch</title>
+<link rel="stylesheet" href="../css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="page auth-page buyer-auth active">
+  <div class="auth-card">
+    <button class="back-btn" onclick="history.back()">← Back</button>
+    <div class="auth-logo">
+      <div class="auth-logo-icon"><img src="../images/logo.png" onerror="this.parentElement.innerHTML='🌾'"></div>
+      <div class="auth-logo-text">FreshFetch</div>
+    </div>
+    <div class="auth-title">Welcome back 👋</div>
+    <div class="auth-sub">Log in to browse fresh produce near you</div>
+    <div id="bl-error" class="error-msg"></div>
+    <div class="form-group">
+      <label class="form-label">Phone Number</label>
+      <div class="input-prefix">
+        <span class="prefix-label">+256</span>
+        <input type="tel" id="bl-phone" placeholder="700 000 000" maxlength="9">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Password</label>
+      <input class="form-input" type="password" id="bl-pass" placeholder="Enter your password" onkeydown="if(event.key==='Enter')loginBuyer()">
+    </div>
+    <button class="btn-primary gold" id="bl-btn" onclick="loginBuyer()">Log In as Buyer</button>
+    <div class="auth-switch">New here? <a href="buyer-signup.html">Create an account</a></div>
+  </div>
+</div>
+
+<script src="../js/app.js"></script>
+<script>
+applyTheme();
+
+window.addEventListener('DOMContentLoaded', async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) {
+    currentUser = session.user;
+    const { data } = await sb.from('profiles').select('*').eq('id', currentUser.id).single();
+    if (data && data.role === 'buyer') {
+      currentProfile = data; currentRole = 'buyer';
+      window.location.href = 'buyer-dashboard.html';
+    }
+  }
+});
+
+async function loginBuyer() {
+  const rawPhone = document.getElementById('bl-phone').value.trim();
+  const pass = document.getElementById('bl-pass').value;
+  if (!rawPhone || !pass) { showErr('bl-error', 'Please fill in all fields'); return; }
+  setLoading('bl-btn', true, 'Log In as Buyer');
+  const email = rawPhone.replace(/\s/g,'') + '@buyer.freshfetch.ug';
+  const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
+  setLoading('bl-btn', false, 'Log In as Buyer');
+  if (error) { showErr('bl-error', 'Invalid phone number or password'); return; }
+  currentUser = data.user;
+  const { data: profile } = await sb.from('profiles').select('*').eq('id', currentUser.id).single();
+  if (profile) { currentProfile = profile; currentRole = 'buyer'; }
+  window.location.href = 'buyer-dashboard.html';
+}
+
+function showToast(msg, isError=false) {
+  // minimal toast for auth pages
+  alert(msg);
+}
+function showErr(id, msg) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 5000);
+}
+function setLoading(btnId, on, originalText) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  btn.disabled = on;
+  btn.innerHTML = on ? '<span class="spinner"></span> Please wait…' : originalText;
+}
+</script>
+<div id="toast" class="toast"></div>
+</body>
+</html>
